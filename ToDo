@@ -1,4 +1,4 @@
--- KNOWN ISSUES: 
+-- KNOWN ISSUES:   
      + (Shiqing Xu) Displacement field near fault's intersection with the surface 
        has minor problems (direction relative to fault dip, partitioning onto different sides, etc)
        for shallowly dipping faults (e.g. 10 degrees).
