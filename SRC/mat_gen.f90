@@ -221,9 +221,12 @@ subroutine MAT_init_prop(mat_elem,mat_input,grid)
   type(matpro_input_type), intent(in), target :: mat_input(:)
   type(sem_grid_type), intent(in) :: grid
 
-  double precision :: celem(grid%ngll,grid%ngll)
-  integer :: e,tag
+  double precision :: celem(grid%ngll,grid%ngll), ecoord(2,grid%ngll,grid%ngll)
+  double precision :: val_grid(3,grid%ngll,grid%ngll)
+  double precision :: val(grid%ngll,grid%ngll),cp(grid%ngll,grid%ngll),cs(grid%ngll,grid%ngll),rho(grid%ngll,grid%ngll), ni(grid%ngll,grid%ngll)
+  integer :: e,tag,ii,jj,dum
   integer :: ngll,cpunit,csunit,rhounit,cpunit2,csunit2,rhounit2,iol
+  logical :: is_user_cs=.True.  
 
   if (echo_init) then
     write(iout,*) 
@@ -239,6 +242,9 @@ subroutine MAT_init_prop(mat_elem,mat_input,grid)
     if (all(grid%tag<tag)) write(iout,*) 'WARNING: material ',tag,' is not assigned to any element'
   enddo
 
+
+
+
   do e=1,grid%nelem
     tag = grid%tag(e)
     if ( tag > size(mat_input) .or. tag<1 ) &
@@ -247,6 +253,74 @@ subroutine MAT_init_prop(mat_elem,mat_input,grid)
     call MAT_init_elem_prop(mat_elem(e), SE_elem_coord(grid,e))
   enddo
   if (echo_init) write(iout,fmtok)
+
+
+
+
+  ! ELIF (26/05/25)
+  ! get the 2D grid and enforce user values of Vs
+  if (is_user_cs) then
+  open(61, file='USER_2D_grid_values.inp', status='old', action='read')
+  !open(61, file='USER_2D_grid_values.inp', status='replace', action='write')
+  open(62, file='USER_2D_grid.inp', status='replace', action='write')
+  !
+  do e=1,grid%nelem
+     ecoord = SE_elem_coord(grid,e)
+     do ii=1,grid%ngll
+     do jj=1,grid%ngll
+        write(62,*) e, ii, jj, ecoord(:,ii,jj)
+        ! Vs, Vp, gref
+        !write(61,*) e, ii, jj, 300d0, 700d0, 0.000365d0
+        read(61,*)  dum,dum,dum,val_grid(:,ii,jj)
+     enddo
+     enddo
+     ! overwrite property for elem
+     cs = val_grid(1,:,:)
+     cp = val_grid(2,:,:)
+     write (*,*) 'ELIF :: USER GRID : OVERWRITE CS'
+     call MAT_setProp(mat_elem(e),'cs',cs,MAT_ELAST_mempro)
+     write (*,*) 'ELIF :: USER GRID : OVERWRITE CP'
+     call MAT_setProp(mat_elem(e),'cp',cp,MAT_ELAST_mempro)
+     ! set rho before !!
+     call MAT_getProp(rho,mat_elem(e),'rho')
+     val = rho*(cp*cp- 2d0*cs*cs) 
+     write (*,*) 'ELIF :: USER GRID : OVERWRITE LAMBDA'
+     call MAT_setProp(mat_elem(e),'lambda',val,MAT_ELAST_mempro)
+     val = rho*cs*cs 
+     write (*,*) 'ELIF :: USER GRID : OVERWRITE MU'
+     call MAT_setProp(mat_elem(e),'mu',val,MAT_ELAST_mempro)
+
+     ! update other parameters depending on const model
+     ! VISLA
+     if (MAT_isViscoLA(mat_elem(e))) then
+       write (*,*) 'ELIF :: USER GRID : OVERWRITE Qp'
+       call MAT_setProp(mat_elem(e),'Qp',cp/10d0,MAT_VISLA_mempro)
+           
+       write (*,*) 'ELIF :: USER GRID : OVERWRITE Qs'
+       call MAT_setProp(mat_elem(e),'Qs',cs/10d0,MAT_VISLA_mempro)
+
+     ! IWAN
+     else if ( MAT_isIwan(mat_elem(e)) ) then
+       write (*,*) 'ELIF :: USER GRID : OVERWRITE gref'
+       call MAT_setProp(mat_elem(e),'gref',val_grid(3,:,:),MAT_IWAN_mempro)
+
+       ni = (cp*cp)/(cs*cs)  
+       ni = (ni-2d0)/(2d0*(ni-1d0)) 
+       call MAT_setProp(mat_elem(e),'ni',ni,MAT_IWAN_mempro)
+
+       val = 2d0*rho*cs*cs* (1d0+ni) 
+       val = val/ (3d0*(1d0-2d0*ni)) 
+       call MAT_setProp(mat_elem(e),'Kmod',val,MAT_IWAN_mempro)
+     endif
+
+  enddo
+  close(61); close(62)
+  endif
+ !
+
+
+
+
 
  ! report memory allocations
   call storearray('matpro', size(transfer(mat_elem(1),(/0/)))*grid%nelem,iinteg)
